@@ -1,0 +1,179 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+
+typedef enum { TOKEN_INT, TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_EOF } TokenType;
+
+typedef struct {
+    TokenType type;
+    int value;
+} Token;
+
+typedef struct ASTNode {
+    TokenType type;
+    int value;
+    struct ASTNode *left;
+    struct ASTNode *right;
+} ASTNode;
+
+const char *input;
+Token current_token;
+int temp_count = 0;
+
+void next_token() {
+    while (isspace(*input)) input++;
+
+    if (isdigit(*input)) {
+        current_token.type = TOKEN_INT;
+        current_token.value = strtol(input, (char**)&input, 10);
+    } else {
+        current_token.type = *input == '+' ? TOKEN_PLUS :
+                            *input == '-' ? TOKEN_MINUS :
+                            *input == '*' ? TOKEN_STAR :
+                            *input == '/' ? TOKEN_SLASH :
+                            *input == '(' ? TOKEN_LPAREN :
+                            *input == ')' ? TOKEN_RPAREN :
+                            TOKEN_EOF;
+        if (*input != '\0') input++;
+    }
+}
+
+ASTNode *expr();
+ASTNode *factor() {
+    ASTNode *node;
+    if (current_token.type == TOKEN_INT) {
+        node = malloc(sizeof(ASTNode));
+        node->type = TOKEN_INT;
+        node->value = current_token.value;
+        node->left = node->right = NULL;
+        next_token();
+    } else if (current_token.type == TOKEN_LPAREN) {
+        next_token();
+        node = expr();
+        if (current_token.type == TOKEN_RPAREN) {
+            next_token();
+        } else {
+            printf("Error: expected ')'\n");
+            exit(1);
+        }
+    } else {
+        printf("Error: expected integer or '('\n");
+        exit(1);
+    }
+    return node;
+}
+
+ASTNode *term() {
+    ASTNode *node = factor();
+    while (current_token.type == TOKEN_STAR || current_token.type == TOKEN_SLASH) {
+        ASTNode *new_node = malloc(sizeof(ASTNode));
+        new_node->type = current_token.type;
+        new_node->left = node;
+        next_token();
+        new_node->right = factor();
+        node = new_node;
+    }
+    return node;
+}
+
+ASTNode *expr() {
+    ASTNode *node = term();
+    while (current_token.type == TOKEN_PLUS || current_token.type == TOKEN_MINUS) {
+        ASTNode *new_node = malloc(sizeof(ASTNode));
+        new_node->type = current_token.type;
+        new_node->left = node;
+        next_token();
+        new_node->right = term();
+        node = new_node;
+    }
+    return node;
+}
+
+void generate_code(ASTNode *node) {
+    if (!node) return;
+
+    if (node->type == TOKEN_INT) {
+        printf("t%d = %d\n", temp_count++, node->value);
+    } else {
+        int left_temp = temp_count++;
+        generate_code(node->left);
+        printf("t%d = t%d\n", left_temp, temp_count - 1);
+
+        int right_temp = temp_count++;
+        generate_code(node->right);
+        printf("t%d = t%d\n", right_temp, temp_count - 1);
+
+        switch (node->type) {
+            case TOKEN_PLUS:
+                printf("t%d = t%d + t%d\n", temp_count++, left_temp, right_temp);
+                break;
+            case TOKEN_MINUS:
+                printf("t%d = t%d - t%d\n", temp_count++, left_temp, right_temp);
+                break;
+            case TOKEN_STAR:
+                printf("t%d = t%d * t%d\n", temp_count++, left_temp, right_temp);
+                break;
+            case TOKEN_SLASH:
+                printf("t%d = t%d / t%d\n", temp_count++, left_temp, right_temp);
+                break;
+            default:
+                printf("Error: unknown operator\n");
+                exit(1);
+        }
+    }
+}
+
+ASTNode* optimize(ASTNode* node) {
+    if (!node) return NULL;
+
+    node->left = optimize(node->left);
+    node->right = optimize(node->right);
+
+    if (node->left && node->right &&
+        node->left->type == TOKEN_INT &&
+        node->right->type == TOKEN_INT) {
+        
+        int left_val = node->left->value;
+        int right_val = node->right->value;
+        int result;
+
+        switch (node->type) {
+            case TOKEN_PLUS:
+                result = left_val + right_val;
+                break;
+            case TOKEN_MINUS:
+                result = left_val - right_val;
+                break;
+            case TOKEN_STAR:
+                result = left_val * right_val;
+                break;
+            case TOKEN_SLASH:
+                result = left_val / right_val;
+                break;
+            default:
+                return node;
+        }
+
+        node->type = TOKEN_INT;
+        node->value = result;
+        free(node->left);
+        free(node->right);
+        node->left = node->right = NULL;
+    }
+
+    return node;
+}
+
+int main() {
+    const char *source_code = "3 + 5 * (2 - 8)";
+    input = source_code;
+    next_token();
+
+    ASTNode *ast = expr();
+    ast = optimize(ast);
+    
+    printf("Intermediate Code:\n");
+    generate_code(ast);
+
+    return 0;
+}
